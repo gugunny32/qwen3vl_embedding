@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: multimodal-rag-api
     ports:
-      - "8000:8000"
+      - "9000:9000"
     volumes:
       - ./app:/app/app
       - ./test_file:/app/test_file
