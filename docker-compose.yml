@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: multimodal-rag-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./test_file:/app/test_file
+      - ./uploads:/app/uploads
+      - model_cache:/root/.cache/huggingface
+    env_file:
+      - .env
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    networks:
+      - rag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  model_cache:
+    driver: local
+
+networks:
+  rag-network:
+    driver: bridge
