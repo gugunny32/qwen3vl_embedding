@@ -78,7 +78,7 @@ def process_pdf_document(
         )
 
         # Extract images directory
-        image_dir = os.path.join(settings.upload_dir, f"images_{doc_id}")
+        image_dir = os.path.join(settings.UPLOAD_DIR, f"images_{doc_id}")
 
         # Extract text and images from PDF
         pages_data = pdf_processor.extract_text_and_images(
@@ -146,20 +146,20 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
     # Create upload directory if not exists
-    os.makedirs(settings.upload_dir, exist_ok=True)
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 
     # Save uploaded file
-    file_path = os.path.join(settings.upload_dir, file.filename)
+    file_path = os.path.join(settings.UPLOAD_DIR, file.filename)
 
     try:
         # Read file content
         file_content = await file.read()
 
         # Check file size
-        if len(file_content) > settings.max_file_size:
+        if len(file_content) > settings.MAX_FILE_SIZE:
             raise HTTPException(
                 status_code=400,
-                detail=f"File size exceeds maximum allowed size ({settings.max_file_size} bytes)"
+                detail=f"File size exceeds maximum allowed size ({settings.MAX_FILE_SIZE} bytes)"
             )
 
         # Save to disk
@@ -287,7 +287,7 @@ async def delete_document(document_id: str):
         doc_ops.delete_document(UUID(document_id))
 
         # Clean up image directory
-        image_dir = os.path.join(settings.upload_dir, f"images_{document_id}")
+        image_dir = os.path.join(settings.UPLOAD_DIR, f"images_{document_id}")
         if os.path.exists(image_dir):
             shutil.rmtree(image_dir)
 

@@ -3,7 +3,7 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from typing import List, Tuple
 import numpy as np
 from loguru import logger
-
+from typing import Optional
 from app.config import get_settings
 
 
@@ -14,7 +14,7 @@ class Qwen3VLReranker:
 
     def __init__(self):
         self.settings = get_settings()
-        self.model_name = self.settings.reranker_model
+        self.model_name = self.settings.RERANKER_MODEL
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         logger.info(f"Initializing {self.model_name} on {self.device}")

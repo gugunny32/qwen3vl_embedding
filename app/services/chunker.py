@@ -12,8 +12,8 @@ class TextChunker:
 
     def __init__(self):
         self.settings = get_settings()
-        self.max_chunk_size = self.settings.max_chunk_size
-        self.chunk_overlap = self.settings.chunk_overlap
+        self.max_chunk_size = self.settings.MAX_CHUNK_SIZE
+        self.chunk_overlap = self.settings.CHUNK_OVERLAP
 
     def chunk_text(
         self,

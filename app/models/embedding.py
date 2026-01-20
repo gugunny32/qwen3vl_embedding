@@ -16,8 +16,8 @@ class Qwen3VLEmbedding:
 
     def __init__(self):
         self.settings = get_settings()
-        self.model_name = self.settings.embedding_model
-        self.embedding_dim = self.settings.embedding_dimension
+        self.model_name = self.settings.EMBEDDING_MODEL
+        self.embedding_dim = self.settings.EMBEDDING_DIMENSION
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         logger.info(f"Initializing {self.model_name} on {self.device}")

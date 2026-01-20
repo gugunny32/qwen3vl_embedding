@@ -14,7 +14,7 @@ class ThaiGenerator:
 
     def __init__(self):
         self.settings = get_settings()
-        self.model_name = self.settings.generator_model
+        self.model_name = self.settings.GENERATOR_MODEL
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         logger.info(f"Initializing {self.model_name} on {self.device}")

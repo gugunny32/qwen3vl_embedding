@@ -111,7 +111,7 @@ class SearchService:
 
         # Use default semantic weight if not provided
         if semantic_weight is None:
-            semantic_weight = self.settings.hybrid_alpha
+            semantic_weight = self.settings.HYBRID_ALPHA
 
         # Generate query embedding
         query_embedding = self.embedding_model.encode_text(query)[0]
@@ -132,7 +132,7 @@ class SearchService:
             results = self._rerank_results(
                 query=query,
                 results=results,
-                top_k=rerank_top_k or self.settings.rerank_top_k
+                top_k=rerank_top_k or self.settings.RERANK_TOP_K
             )
 
         return results[:top_k]

@@ -12,7 +12,7 @@ import argparse
 from pathlib import Path
 
 # Base URL
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8003"
 
 
 def print_section(title):

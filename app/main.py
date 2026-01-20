@@ -187,13 +187,13 @@ async def status():
         "gpu_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
         "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
         "settings": {
-            "embedding_model": settings.embedding_model,
-            "embedding_dimension": settings.embedding_dimension,
-            "reranker_model": settings.reranker_model,
-            "generator_model": settings.generator_model,
-            "max_chunk_size": settings.max_chunk_size,
-            "top_k": settings.top_k,
-            "hybrid_alpha": settings.hybrid_alpha
+            "embedding_model": settings.EMBEDDING_MODEL,
+            "embedding_dimension": settings.EMBEDDING_DIMENSION,
+            "reranker_model": settings.RERANKER_MODEL,
+            "generator_model": settings.GENERATOR_MODEL,
+            "max_chunk_size": settings.MAX_CHUNK_SIZE,
+            "top_k": settings.TOP_K,
+            "hybrid_alpha": settings.HYBRID_ALPHA
         }
     }
 
@@ -203,7 +203,7 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "app.main:app",
-        host=settings.api_host,
-        port=settings.api_port,
+        host=settings.API_HOST,
+        port=settings.API_PORT,
         reload=True
     )

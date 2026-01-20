@@ -57,3 +57,4 @@ uploads/
 
 # Test outputs
 test_outputs/
+hf-cache/

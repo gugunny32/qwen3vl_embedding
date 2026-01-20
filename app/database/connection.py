@@ -20,7 +20,7 @@ class Database:
             self.pool = ThreadedConnectionPool(
                 minconn=1,
                 maxconn=10,
-                dsn=self.settings.supabase_db_url
+                dsn=self.settings.SUPABASE_DB_URL
             )
             logger.info("Database connection pool initialized")
         except Exception as e:
