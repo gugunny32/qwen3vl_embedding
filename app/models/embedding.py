@@ -1,17 +1,18 @@
 import torch
-from transformers import AutoModel, AutoTokenizer, AutoProcessor
 from typing import List, Union, Optional
 import numpy as np
 from loguru import logger
 from PIL import Image
 
 from app.config import get_settings
+from app.models.qwen3_vl_embedder import Qwen3VLEmbedder
 
 
 class Qwen3VLEmbedding:
     """
     Qwen3-VL-Embedding-2B model for multimodal embeddings.
     Supports both text and image inputs.
+    Uses the official Qwen3VLEmbedder implementation.
     """
 
     def __init__(self):
@@ -22,26 +23,23 @@ class Qwen3VLEmbedding:
 
         logger.info(f"Initializing {self.model_name} on {self.device}")
 
-        # Load model and tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_name,
-            trust_remote_code=True
+        # Load using official Qwen3VLEmbedder
+        model_kwargs = {
+            "torch_dtype": torch.float16 if self.device == "cuda" else torch.float32,
+        }
+        
+        # Add flash attention for CUDA if available
+        if self.device == "cuda":
+            try:
+                model_kwargs["attn_implementation"] = "flash_attention_2"
+            except:
+                logger.warning("flash_attention_2 not available, using default attention")
+        
+        self.embedder = Qwen3VLEmbedder(
+            model_name_or_path=self.model_name,
+            **model_kwargs
         )
-        self.processor = AutoProcessor.from_pretrained(
-            self.model_name,
-            trust_remote_code=True
-        )
-        self.model = AutoModel.from_pretrained(
-            self.model_name,
-            trust_remote_code=True,
-            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-            device_map="auto" if self.device == "cuda" else None
-        )
-
-        if self.device == "cpu":
-            self.model = self.model.to(self.device)
-
-        self.model.eval()
+        
         logger.info(f"Model loaded successfully with {self.embedding_dim} dimensions")
 
     @torch.no_grad()
@@ -69,42 +67,20 @@ class Qwen3VLEmbedding:
 
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i:i + batch_size]
-
-            # Tokenize
-            inputs = self.tokenizer(
-                batch_texts,
-                padding=True,
-                truncation=True,
-                max_length=512,
-                return_tensors="pt"
-            )
-
-            # Move to device
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-
-            # Get embeddings
-            outputs = self.model(**inputs)
-
-            # Extract embeddings (use last hidden state or pooler output)
-            if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
-                embeddings = outputs.pooler_output
-            else:
-                # Use mean pooling over sequence
-                embeddings = outputs.last_hidden_state.mean(dim=1)
-
+            
+            # Format inputs for Qwen3VLEmbedder
+            inputs = [{"text": text} for text in batch_texts]
+            
+            # Get embeddings using the embedder's process method
+            embeddings = self.embedder.process(inputs, normalize=normalize)
+            
             # Adjust dimension if needed
             if embeddings.shape[-1] != self.embedding_dim:
-                # Use projection or slicing
                 if embeddings.shape[-1] > self.embedding_dim:
                     embeddings = embeddings[..., :self.embedding_dim]
                 else:
-                    # Pad with zeros if smaller
                     padding_size = self.embedding_dim - embeddings.shape[-1]
                     embeddings = torch.nn.functional.pad(embeddings, (0, padding_size))
-
-            # Normalize if requested
-            if normalize:
-                embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
             all_embeddings.append(embeddings.cpu().numpy())
 
@@ -133,23 +109,11 @@ class Qwen3VLEmbedding:
         if isinstance(images, Image.Image):
             images = [images]
 
-        # Process images
-        inputs = self.processor(
-            images=images,
-            return_tensors="pt"
-        )
-
-        # Move to device
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
-
+        # Format inputs for Qwen3VLEmbedder
+        inputs = [{"image": img} for img in images]
+        
         # Get embeddings
-        outputs = self.model(**inputs)
-
-        # Extract embeddings
-        if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
-            embeddings = outputs.pooler_output
-        else:
-            embeddings = outputs.last_hidden_state.mean(dim=1)
+        embeddings = self.embedder.process(inputs, normalize=normalize)
 
         # Adjust dimension if needed
         if embeddings.shape[-1] != self.embedding_dim:
@@ -158,10 +122,6 @@ class Qwen3VLEmbedding:
             else:
                 padding_size = self.embedding_dim - embeddings.shape[-1]
                 embeddings = torch.nn.functional.pad(embeddings, (0, padding_size))
-
-        # Normalize if requested
-        if normalize:
-            embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
         result = embeddings.cpu().numpy()
 
@@ -190,24 +150,11 @@ class Qwen3VLEmbedding:
             # Text only
             return self.encode_text(text, normalize=normalize)[0]
 
-        # Multimodal processing
-        inputs = self.processor(
-            text=text,
-            images=image,
-            return_tensors="pt"
-        )
-
-        # Move to device
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
-
-        # Get embeddings
-        outputs = self.model(**inputs)
-
-        # Extract embeddings
-        if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
-            embeddings = outputs.pooler_output
-        else:
-            embeddings = outputs.last_hidden_state.mean(dim=1)
+        # Multimodal input
+        inputs = [{"text": text, "image": image}]
+        
+        # Get embedding
+        embeddings = self.embedder.process(inputs, normalize=normalize)
 
         # Adjust dimension
         if embeddings.shape[-1] != self.embedding_dim:
@@ -216,10 +163,6 @@ class Qwen3VLEmbedding:
             else:
                 padding_size = self.embedding_dim - embeddings.shape[-1]
                 embeddings = torch.nn.functional.pad(embeddings, (0, padding_size))
-
-        # Normalize
-        if normalize:
-            embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
         result = embeddings.cpu().numpy()[0]
 

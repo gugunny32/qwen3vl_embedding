@@ -1,15 +1,16 @@
 import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from typing import List, Tuple
 import numpy as np
 from loguru import logger
 from typing import Optional
 from app.config import get_settings
+from app.models.qwen3_vl_reranker import Qwen3VLReranker as Qwen3VLRerankerImpl
 
 
 class Qwen3VLReranker:
     """
     Qwen3-VL-Reranker-2B model for re-ranking search results.
+    Uses the official Qwen3VLReranker implementation.
     """
 
     def __init__(self):
@@ -19,22 +20,23 @@ class Qwen3VLReranker:
 
         logger.info(f"Initializing {self.model_name} on {self.device}")
 
-        # Load model and tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_name,
-            trust_remote_code=True
+        # Load using official Qwen3VLReranker
+        model_kwargs = {
+            "torch_dtype": torch.float16 if self.device == "cuda" else torch.float32,
+        }
+        
+        # Add flash attention for CUDA if available
+        if self.device == "cuda":
+            try:
+                model_kwargs["attn_implementation"] = "flash_attention_2"
+            except:
+                logger.warning("flash_attention_2 not available, using default attention")
+        
+        self.reranker = Qwen3VLRerankerImpl(
+            model_name_or_path=self.model_name,
+            **model_kwargs
         )
-        self.model = AutoModelForSequenceClassification.from_pretrained(
-            self.model_name,
-            trust_remote_code=True,
-            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-            device_map="auto" if self.device == "cuda" else None
-        )
-
-        if self.device == "cpu":
-            self.model = self.model.to(self.device)
-
-        self.model.eval()
+        
         logger.info("Reranker model loaded successfully")
 
     @torch.no_grad()
@@ -58,35 +60,14 @@ class Qwen3VLReranker:
         if not documents:
             return []
 
-        scores = []
-
-        # Process in batches to avoid memory issues
-        batch_size = 8
-        for i in range(0, len(documents), batch_size):
-            batch_docs = documents[i:i + batch_size]
-
-            # Create query-document pairs
-            pairs = [[query, doc] for doc in batch_docs]
-
-            # Tokenize
-            inputs = self.tokenizer(
-                pairs,
-                padding=True,
-                truncation=True,
-                max_length=512,
-                return_tensors="pt"
-            )
-
-            # Move to device
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-
-            # Get scores
-            outputs = self.model(**inputs)
-            logits = outputs.logits
-
-            # Convert to relevance scores
-            batch_scores = torch.softmax(logits, dim=-1)[:, 1].cpu().numpy()
-            scores.extend(batch_scores)
+        # Format inputs for Qwen3VLReranker
+        inputs = {
+            "query": {"text": query},
+            "documents": [{"text": doc} for doc in documents]
+        }
+        
+        # Get scores from the reranker
+        scores = self.reranker.process(inputs)
 
         # Create (index, score) pairs
         indexed_scores = list(enumerate(scores))
@@ -120,37 +101,16 @@ class Qwen3VLReranker:
         if not documents:
             return np.array([])
 
-        all_scores = []
+        # Format inputs for Qwen3VLReranker
+        inputs = {
+            "query": {"text": query},
+            "documents": [{"text": doc} for doc in documents]
+        }
+        
+        # Get scores from the reranker
+        scores = self.reranker.process(inputs)
 
-        # Process in batches
-        batch_size = 8
-        for i in range(0, len(documents), batch_size):
-            batch_docs = documents[i:i + batch_size]
-
-            # Create query-document pairs
-            pairs = [[query, doc] for doc in batch_docs]
-
-            # Tokenize
-            inputs = self.tokenizer(
-                pairs,
-                padding=True,
-                truncation=True,
-                max_length=512,
-                return_tensors="pt"
-            )
-
-            # Move to device
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-
-            # Get scores
-            outputs = self.model(**inputs)
-            logits = outputs.logits
-
-            # Convert to relevance scores (probability of being relevant)
-            batch_scores = torch.softmax(logits, dim=-1)[:, 1].cpu().numpy()
-            all_scores.extend(batch_scores)
-
-        return np.array(all_scores)
+        return np.array(scores)
 
 
 # Global instance

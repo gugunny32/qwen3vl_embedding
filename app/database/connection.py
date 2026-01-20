@@ -2,6 +2,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 from psycopg2.pool import ThreadedConnectionPool
 from contextlib import contextmanager
+
 from typing import Optional
 from loguru import logger
 
