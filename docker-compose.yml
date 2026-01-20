@@ -16,7 +16,7 @@ services:
     env_file:
       - .env
     environment:
-      - CUDA_VISIBLE_DEVICES=0
+      - CUDA_VISIBLE_DEVICES=all
     deploy:
       resources:
         reservations:
