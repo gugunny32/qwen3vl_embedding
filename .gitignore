@@ -44,10 +44,13 @@ Thumbs.db
 # Docker
 docker-compose.override.yml
 
-# Model cache
-models/
+# Model cache (downloaded models, not source code)
+/models/
 .cache/
 huggingface/
+*.pth
+*.bin
+*.safetensors
 
 # Uploaded files
 uploads/
