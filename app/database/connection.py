@@ -1,12 +1,17 @@
 import psycopg2
+import psycopg2.extensions
 from psycopg2.extras import RealDictCursor, Json
 from psycopg2.pool import ThreadedConnectionPool
 from contextlib import contextmanager
+import json
 
 from typing import Optional
 from loguru import logger
 
 from app.config import get_settings
+
+# Register dict as JSON adapter globally
+psycopg2.extensions.register_adapter(dict, Json)
 
 
 class Database:

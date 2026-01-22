@@ -16,28 +16,23 @@ class Qwen3VLReranker:
     def __init__(self):
         self.settings = get_settings()
         self.model_name = self.settings.RERANKER_MODEL
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        # Force CPU usage to avoid CUDA kernel assertion errors
+        self.device = "cpu"
 
-        logger.info(f"Initializing {self.model_name} on {self.device}")
+        logger.info(f"Initializing {self.model_name} on {self.device} (forced to avoid CUDA issues)")
 
-        # Load using official Qwen3VLReranker
+        # Load using official Qwen3VLReranker on CPU
         model_kwargs = {
-            "torch_dtype": torch.float16 if self.device == "cuda" else torch.float32,
+            "torch_dtype": torch.float32,
+            "use_cpu": True  # Force CPU execution
         }
-        
-        # Add flash attention for CUDA if available
-        if self.device == "cuda":
-            try:
-                model_kwargs["attn_implementation"] = "flash_attention_2"
-            except:
-                logger.warning("flash_attention_2 not available, using default attention")
         
         self.reranker = Qwen3VLRerankerImpl(
             model_name_or_path=self.model_name,
             **model_kwargs
         )
         
-        logger.info("Reranker model loaded successfully")
+        logger.info("Reranker model loaded successfully on CPU")
 
     @torch.no_grad()
     def rerank(
@@ -60,27 +55,57 @@ class Qwen3VLReranker:
         if not documents:
             return []
 
-        # Format inputs for Qwen3VLReranker
-        inputs = {
-            "query": {"text": query},
-            "documents": [{"text": doc} for doc in documents]
-        }
+        # Validate inputs
+        if not query or not query.strip():
+            logger.warning("Empty query for reranking, returning original order")
+            return [(i, 1.0 / (i + 1)) for i in range(min(top_k or len(documents), len(documents)))]
         
-        # Get scores from the reranker
-        scores = self.reranker.process(inputs)
+        # Filter out empty documents
+        valid_docs = [(i, doc) for i, doc in enumerate(documents) if doc and doc.strip()]
+        if not valid_docs:
+            logger.warning("No valid documents for reranking, returning empty result")
+            return []
 
-        # Create (index, score) pairs
-        indexed_scores = list(enumerate(scores))
+        try:
+            # Format inputs for Qwen3VLReranker
+            inputs = {
+                "query": {"text": query.strip()},
+                "documents": [{"text": doc.strip()} for _, doc in valid_docs]
+            }
+            
+            # Clear CUDA cache before processing to avoid memory issues
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            # Get scores from the reranker
+            scores = self.reranker.process(inputs)
+            
+            # Validate scores
+            scores = np.array(scores)
+            if np.any(np.isnan(scores)) or np.any(np.isinf(scores)) or np.any(scores < 0) or np.any(scores > 1):
+                logger.warning(f"Invalid scores detected in reranker output (nan={np.any(np.isnan(scores))}, inf={np.any(np.isinf(scores))}, out_of_range={np.any((scores < 0) | (scores > 1))}), falling back to original order")
+                # Return original order with dummy scores
+                return [(i, 1.0 / (i + 1)) for i in range(min(top_k or len(documents), len(documents)))]
 
-        # Sort by score (descending)
-        indexed_scores.sort(key=lambda x: x[1], reverse=True)
+            # Map back to original indices
+            indexed_scores = [(orig_idx, float(score)) for (orig_idx, _), score in zip(valid_docs, scores.tolist())]
 
-        # Return top_k if specified
-        if top_k is not None:
-            indexed_scores = indexed_scores[:top_k]
+            # Sort by score (descending)
+            indexed_scores.sort(key=lambda x: x[1], reverse=True)
 
-        logger.debug(f"Reranked {len(documents)} documents, returning top {len(indexed_scores)}")
-        return indexed_scores
+            # Return top_k if specified
+            if top_k is not None:
+                indexed_scores = indexed_scores[:top_k]
+
+            logger.debug(f"Reranked {len(documents)} documents, returning top {len(indexed_scores)}")
+            return indexed_scores
+            
+        except Exception as e:
+            logger.error(f"Error in reranking: {e}, falling back to original order")
+            import traceback
+            traceback.print_exc()
+            # Return original order with dummy scores
+            return [(i, 1.0 / (i + 1)) for i in range(min(top_k or len(documents), len(documents)))]
 
     @torch.no_grad()
     def compute_scores(

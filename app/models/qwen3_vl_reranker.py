@@ -54,9 +54,18 @@ class Qwen3VLReranker:
         fps: float = FPS,
         max_frames: int = MAX_FRAMES,
         default_instruction: str = "Given a search query, retrieve relevant candidates that answer the query.",
+        use_cpu: bool = False,  # Force CPU to avoid CUDA issues
         **kwargs,
     ):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Use CPU by default to avoid CUDA assertion errors
+        self.device = torch.device("cpu" if use_cpu else ("cuda" if torch.cuda.is_available() else "cpu"))
+        self.use_cpu = use_cpu
+        
+        # Force CPU as default device if use_cpu is True
+        if use_cpu:
+            torch.set_default_device('cpu')
+            torch.set_default_dtype(torch.float32)
+            logger.info("Set default PyTorch device to CPU")
 
         self.max_length = max_length
         self.min_pixels = min_pixels
@@ -66,14 +75,26 @@ class Qwen3VLReranker:
         self.max_frames = max_frames
         self.default_instruction = default_instruction
 
-        logger.info(f"Loading Qwen3VLReranker from {model_name_or_path}")
+        logger.info(f"Loading Qwen3VLReranker from {model_name_or_path} on {self.device}")
 
-        # Load the language model
+        # Filter out device-related kwargs to ensure CPU usage
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k not in ['device', 'device_map', 'torch_dtype']}
+        
+        # Force CPU dtype when using CPU
+        if use_cpu:
+            filtered_kwargs['torch_dtype'] = torch.float32
+        
+        # Load the language model on CPU
         lm = Qwen3VLForConditionalGeneration.from_pretrained(
             model_name_or_path,
             trust_remote_code=True,
-            **kwargs
-        ).to(self.device)
+            device_map='cpu' if use_cpu else 'auto',
+            **filtered_kwargs
+        )
+        
+        # Verify model is on correct device
+        actual_device = next(lm.parameters()).device
+        logger.info(f"Model loaded on device: {actual_device}")
 
         self.model = lm.model
         self.processor = AutoProcessor.from_pretrained(
@@ -88,7 +109,12 @@ class Qwen3VLReranker:
         token_false_id = self.processor.tokenizer.get_vocab()["no"]
         self.score_linear = self.get_binary_linear(lm, token_true_id, token_false_id)
         self.score_linear.eval()
-        self.score_linear.to(self.device).to(self.model.dtype)
+        # Ensure score_linear stays on same device as model
+        if use_cpu:
+            self.score_linear = self.score_linear.to('cpu').to(torch.float32)
+            logger.info(f"Score linear on device: {next(self.score_linear.parameters()).device}")
+        else:
+            self.score_linear = self.score_linear.to(self.device).to(self.model.dtype)
         
         logger.info(f"Qwen3VLReranker loaded successfully on {self.device}")
 
@@ -110,7 +136,17 @@ class Qwen3VLReranker:
         """Compute relevance scores for query-document pairs"""
         batch_scores = self.model(**inputs).last_hidden_state[:, -1]
         scores = self.score_linear(batch_scores)
+        
+        # Clamp scores to prevent numerical instability in sigmoid
+        scores = torch.clamp(scores, min=-20.0, max=20.0)
+        
         scores = torch.sigmoid(scores).squeeze(-1).cpu().detach().tolist()
+        
+        # Validate scores
+        if isinstance(scores, float):
+            scores = [scores]
+        scores = [max(0.0, min(1.0, s)) for s in scores]  # Ensure in valid range
+        
         return scores
 
     def truncate_tokens_optimized(
@@ -332,7 +368,13 @@ class Qwen3VLReranker:
         final_scores = []
         for pair in pairs:
             tokenized_inputs = self.tokenize([pair])
-            tokenized_inputs = tokenized_inputs.to(self.model.device)
+            # Explicitly move to the correct device (CPU if use_cpu was set)
+            if self.use_cpu:
+                # Force all tensors to CPU
+                tokenized_inputs = {k: v.to('cpu') if isinstance(v, torch.Tensor) else v 
+                                   for k, v in tokenized_inputs.items()}
+            else:
+                tokenized_inputs = tokenized_inputs.to(self.device)
             scores = self.compute_scores(tokenized_inputs)
             final_scores.extend(scores)
 

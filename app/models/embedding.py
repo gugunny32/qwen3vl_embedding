@@ -26,6 +26,7 @@ class Qwen3VLEmbedding:
         # Load using official Qwen3VLEmbedder
         model_kwargs = {
             "torch_dtype": torch.float16 if self.device == "cuda" else torch.float32,
+            "attn_implementation" : "flash_attention_2" if self.device == "cuda" else "default"
         }
         
         # Add flash attention for CUDA if available

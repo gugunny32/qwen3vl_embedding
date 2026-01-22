@@ -67,6 +67,39 @@ class PDFProcessor:
                         page_data['images'] = images
                         page_data['has_images'] = True
 
+                # Fallback: render full page as image if no text and no images
+                if extract_images and (not page_data['has_text']) and (not page_data['has_images']):
+                    try:
+                        # Render page at moderate resolution
+                        zoom = 2.0  # ~144 DPI
+                        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+                        img_bytes = pix.tobytes("png")
+                        pil_image = Image.open(io.BytesIO(img_bytes))
+
+                        image_path = None
+                        if image_output_dir:
+                            os.makedirs(image_output_dir, exist_ok=True)
+                            image_filename = f"page_{page_num + 1}_rendered.png"
+                            image_path = os.path.join(image_output_dir, image_filename)
+                            pil_image.save(image_path)
+
+                        width, height = pil_image.size
+                        page_data['images'] = [
+                            {
+                                'image_index': 0,
+                                'image_path': image_path,
+                                'width': width,
+                                'height': height,
+                                'format': 'png',
+                                'pil_image': pil_image,
+                                'rendered_page': True
+                            }
+                        ]
+                        page_data['has_images'] = True
+                        logger.info(f"Rendered page {page_num + 1} as image for OCR/caption fallback")
+                    except Exception as e:
+                        logger.warning(f"Failed to render page {page_num + 1} as image: {e}")
+
                 pages_data.append(page_data)
 
             doc.close()
@@ -97,8 +130,8 @@ class PDFProcessor:
         """
         images_data = []
 
-        # Get images from page
-        image_list = page.get_images()
+        # Get images from page (full=True includes inline images)
+        image_list = page.get_images(full=True)
 
         for img_idx, img in enumerate(image_list):
             try:
@@ -112,9 +145,9 @@ class PDFProcessor:
                 # Convert to PIL Image
                 pil_image = Image.open(io.BytesIO(image_bytes))
 
-                # Filter out small images (likely logos or icons)
+                # Filter out tiny images (likely icons) with lower threshold
                 width, height = pil_image.size
-                if width < 100 or height < 100:
+                if width < 10 or height < 10:
                     continue
 
                 # Save image if output directory provided
@@ -138,6 +171,8 @@ class PDFProcessor:
                 logger.warning(f"Failed to extract image {img_idx} from page {page_num}: {e}")
                 continue
 
+        if images_data:
+            logger.info(f"Extracted {len(images_data)} images from page {page_num + 1}")
         return images_data
 
     def get_pdf_metadata(self, pdf_path: str) -> Dict:

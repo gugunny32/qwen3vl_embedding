@@ -22,7 +22,8 @@ class ThaiGenerator:
         # Load tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_name,
-            trust_remote_code=True
+            trust_remote_code=True,
+            enable_thinking=False
         )
 
         # Load model with optimizations
@@ -31,7 +32,7 @@ class ThaiGenerator:
             trust_remote_code=True,
             torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
             device_map="auto" if self.device == "cuda" else None,
-            load_in_8bit=True if self.device == "cuda" else False,  # Use 8-bit quantization to save memory
+            attn_implementation="flash_attention_2",
         )
 
         if self.device == "cpu":
@@ -62,6 +63,8 @@ class ThaiGenerator:
                 "คุณเป็นผู้ช่วยที่เชี่ยวชาญในการตอบคำถามโดยอ้างอิงจากเอกสาร "
                 "โปรดตอบคำถามโดยใช้ข้อมูลจากบริบทที่ให้มา "
                 "ถ้าไม่พบข้อมูลในบริบท ให้บอกว่าไม่มีข้อมูลเพียงพอในการตอบ"
+                "หากในบริบท มีเลขหน้า ให้ระบุเลขหน้าในคำตอบด้วย"
+                "หากมีรูปภาพในบริบท ให้อ้างอิงรูปภาพในคำตอบด้วย"
             )
 
         # Combine contexts
@@ -89,7 +92,7 @@ class ThaiGenerator:
         top_p: float = 0.9,
         top_k: int = 50,
         repetition_penalty: float = 1.1,
-        do_sample: bool = True
+        do_sample: bool = False
     ) -> str:
         """
         Generate text from prompt.
@@ -168,7 +171,8 @@ class ThaiGenerator:
         answer = self.generate(
             prompt,
             max_new_tokens=max_new_tokens,
-            temperature=temperature
+            temperature=temperature,
+            do_sample=False
         )
 
         return answer
@@ -200,7 +204,8 @@ class ThaiGenerator:
         summary = self.generate(
             prompt,
             max_new_tokens=max_new_tokens,
-            temperature=0.5
+            temperature=0.5,
+            do_sample=False
         )
 
         return summary

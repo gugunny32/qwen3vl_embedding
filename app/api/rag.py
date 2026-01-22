@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/v1/rag", tags=["rag"])
 class QueryRequest(BaseModel):
     question: str = Field(..., description="User's question")
     top_k: int = Field(5, description="Number of contexts to retrieve", ge=1, le=20)
-    use_reranker: bool = Field(True, description="Whether to use reranker")
+    use_reranker: bool = Field(False, description="Whether to use reranker")
     document_id: Optional[str] = Field(None, description="Search within specific document")
     temperature: float = Field(0.7, description="Generation temperature", ge=0.0, le=2.0)
     max_tokens: int = Field(512, description="Maximum tokens to generate", ge=50, le=2048)

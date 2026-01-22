@@ -20,10 +20,14 @@ class SearchService:
         self.reranker_model = None
 
     def _ensure_models_loaded(self):
-        """Lazy load models"""
+        """Lazy load embedding model"""
         if self.embedding_model is None:
             self.embedding_model = get_embedding_model()
+    
+    def _ensure_reranker_loaded(self):
+        """Lazy load reranker model only when needed"""
         if self.reranker_model is None:
+            logger.info("Loading reranker model on demand...")
             self.reranker_model = get_reranker_model()
 
     def semantic_search(
@@ -156,6 +160,9 @@ class SearchService:
         """
         if not results:
             return results
+
+        # Load reranker on demand
+        self._ensure_reranker_loaded()
 
         # Extract documents
         documents = [r['content'] for r in results]

@@ -26,7 +26,7 @@ class RAGService:
         self,
         question: str,
         top_k: int = 5,
-        use_reranker: bool = True,
+        use_reranker: bool = False,
         document_id: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 512

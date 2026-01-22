@@ -10,6 +10,7 @@ from app.database.operations import DocumentOperations, ChunkOperations, compute
 from app.services.pdf_processor import PDFProcessor
 from app.services.chunker import TextChunker
 from app.models.embedding import get_embedding_model
+from app.models.captioner import get_captioner_model
 from app.config import get_settings
 
 router = APIRouter(prefix="/api/v1/documents", tags=["documents"])
@@ -57,6 +58,7 @@ def process_pdf_document(
         pdf_processor = PDFProcessor()
         chunker = TextChunker()
         embedding_model = get_embedding_model()
+        captioner_model = None
 
         # Check if document already exists by hash
         content_hash = compute_file_hash(file_content)
@@ -91,32 +93,70 @@ def process_pdf_document(
         chunks_data = chunker.chunk_pages(pages_data)
 
         # Generate embeddings and store chunks
-        for chunk_data in chunks_data:
-            # Generate embedding
-            if chunk_data['has_image'] and chunk_data['pil_image']:
-                # Multimodal embedding
-                embedding = embedding_model.encode_multimodal(
-                    text=chunk_data['content'],
-                    image=chunk_data['pil_image']
+        total_chunks = len(chunks_data)
+        successful_chunks = 0
+        failed_chunks = 0
+        
+        logger.info(f"Starting to process {total_chunks} chunks...")
+
+        for i, chunk_data in enumerate(chunks_data):
+            try:
+                # Log progress every 50 chunks
+                if (i + 1) % 50 == 0:
+                    logger.info(f"Processing chunk {i + 1}/{total_chunks}...")
+
+                # Add image caption for image chunks
+                if chunk_data.get('has_image') and chunk_data.get('pil_image'):
+                    if captioner_model is None:
+                        captioner_model = get_captioner_model()
+                    try:
+                        caption = captioner_model.caption_image(chunk_data['pil_image'])
+                        if caption:
+                            chunk_data['content'] = f"{chunk_data['content']}\nคำบรรยายภาพ: {caption}"
+                            chunk_data['metadata'] = {
+                                **(chunk_data.get('metadata') or {}),
+                                'image_caption': caption
+                            }
+                    except Exception as e:
+                        logger.warning(f"Failed to caption image chunk {i}: {e}")
+
+                # Generate embedding
+                if chunk_data['has_image'] and chunk_data['pil_image']:
+                    # Multimodal embedding
+                    embedding = embedding_model.encode_multimodal(
+                        text=chunk_data['content'],
+                        image=chunk_data['pil_image']
+                    )
+                else:
+                    # Text-only embedding
+                    embedding = embedding_model.encode_text(chunk_data['content'])[0]
+
+                # Store chunk
+                chunk_ops.create_chunk(
+                    document_id=doc_id,
+                    chunk_index=chunk_data['chunk_index'],
+                    content=chunk_data['content'],
+                    embedding=embedding,
+                    metadata=chunk_data['metadata'],
+                    has_image=chunk_data['has_image'],
+                    image_path=chunk_data['image_path'],
+                    page_number=chunk_data['page_number']
                 )
-            else:
-                # Text-only embedding
-                embedding = embedding_model.encode_text(chunk_data['content'])[0]
+                
+                successful_chunks += 1
 
-            # Store chunk
-            chunk_ops.create_chunk(
-                document_id=doc_id,
-                chunk_index=chunk_data['chunk_index'],
-                content=chunk_data['content'],
-                embedding=embedding,
-                metadata=chunk_data['metadata'],
-                has_image=chunk_data['has_image'],
-                image_path=chunk_data['image_path'],
-                page_number=chunk_data['page_number']
-            )
+            except Exception as e:
+                failed_chunks += 1
+                logger.error(f"Failed to process chunk {i} (page {chunk_data.get('page_number')}): {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                # Continue processing other chunks
+                continue
 
-        # Update document with chunk count
-        doc_ops.update_document_chunks_count(doc_id, len(chunks_data))
+        # Update document with successful chunk count
+        doc_ops.update_document_chunks_count(doc_id, successful_chunks)
+        
+        logger.info(f"Chunk processing complete: {successful_chunks} successful, {failed_chunks} failed out of {total_chunks} total")
 
         logger.info(f"Successfully processed document {doc_id} with {len(chunks_data)} chunks")
 

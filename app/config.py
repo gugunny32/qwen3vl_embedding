@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "Qwen/Qwen3-VL-Embedding-2B"
     EMBEDDING_DIMENSION: int = 1024
     RERANKER_MODEL: str = "Qwen/Qwen3-VL-Reranker-2B"
-    GENERATOR_MODEL: str = "SeaLLMs/SeaLLM-7B-v3"
+    GENERATOR_MODEL: str = "SeaLLMs/SeaLLMs-v3-7B"
 
     # API Configuration
     API_HOST: str = "0.0.0.0"

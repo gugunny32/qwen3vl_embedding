@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.6.0-cudnn-devel-ubuntu22.04
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -23,9 +23,16 @@ WORKDIR /app
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install Python dependencies in stages
+# First install torch and basic dependencies
 RUN pip3 install --no-cache-dir --upgrade pip && \
-    pip3 install --no-cache-dir -r requirements.txt
+    pip3 install --no-cache-dir torch>=2.1.2 torchvision>=0.16.0 numpy packaging ninja psutil
+
+# Then install flash-attn (requires torch to be installed first)
+RUN pip3 install --no-cache-dir flash-attn>=2.5.0 --no-build-isolation
+
+# Finally install remaining dependencies
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/

@@ -114,7 +114,7 @@ BEGIN
             c.content,
             c.metadata,
             c.page_number,
-            ts_rank(c.content_tsv, plainto_tsquery('simple', query_text)) AS score
+            ts_rank(c.content_tsv, plainto_tsquery('simple', query_text))::DOUBLE PRECISION AS score
         FROM chunks c
         WHERE c.content_tsv @@ plainto_tsquery('simple', query_text)
         ORDER BY score DESC
