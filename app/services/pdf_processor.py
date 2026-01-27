@@ -3,6 +3,7 @@ from PIL import Image
 from typing import List, Dict, Tuple, Optional
 import io
 import os
+import re
 from loguru import logger
 
 from app.config import get_settings
@@ -11,10 +12,13 @@ from app.config import get_settings
 class PDFProcessor:
     """
     Process PDF documents to extract text and images.
+    Enhanced with better Thai text extraction support.
     """
 
     def __init__(self):
         self.settings = get_settings()
+        self._ocr_available = None
+        self._tesseract_available = None
 
     def extract_text_and_images(
         self,
@@ -50,8 +54,8 @@ class PDFProcessor:
                     'has_images': False
                 }
 
-                # Extract text
-                text = page.get_text()
+                # Extract text with improved method
+                text = self._extract_text_from_page(page, page_num)
                 if text.strip():
                     page_data['text'] = text.strip()
                     page_data['has_text'] = True
@@ -245,8 +249,9 @@ class PDFProcessor:
             doc = fitz.open(pdf_path)
             full_text = ""
 
-            for page in doc:
-                full_text += page.get_text() + "\n\n"
+            for page_num, page in enumerate(doc):
+                page_text = self._extract_text_from_page(page, page_num)
+                full_text += page_text + "\n\n"
 
             doc.close()
             return full_text.strip()
@@ -254,3 +259,167 @@ class PDFProcessor:
         except Exception as e:
             logger.error(f"Error extracting full text from {pdf_path}: {e}")
             raise
+
+    def _extract_text_from_page(
+        self,
+        page: fitz.Page,
+        page_num: int,
+        use_ocr_fallback: bool = True
+    ) -> str:
+        """
+        Extract text from a page with multiple strategies for Thai text support.
+
+        Tries multiple extraction methods:
+        1. Standard text extraction with different flags
+        2. Block-based extraction
+        3. OCR fallback for garbled text (especially Thai)
+
+        Args:
+            page: PyMuPDF page object
+            page_num: Page number
+            use_ocr_fallback: Whether to use OCR when text is garbled
+
+        Returns:
+            Extracted text
+        """
+        # Strategy 1: Try standard extraction with flags
+        try:
+            flags = fitz.TEXT_PRESERVE_LIGATURES | fitz.TEXT_PRESERVE_WHITESPACE
+            text = page.get_text("text", flags=flags)
+            
+            # Check if text is garbled (contains replacement characters or encoding issues)
+            if text and self._is_text_garbled(text):
+                logger.debug(f"Page {page_num + 1}: Detected garbled text, trying alternative methods")
+                
+                # Strategy 2: Try block-based extraction
+                text_blocks = page.get_text("blocks")
+                block_text = "\n".join([block[4] for block in text_blocks if len(block) > 4 and block[4].strip()])
+                
+                if block_text and not self._is_text_garbled(block_text):
+                    logger.debug(f"Page {page_num + 1}: Block extraction successful")
+                    return block_text
+                
+                # Strategy 3: OCR fallback for garbled Thai text
+                if use_ocr_fallback:
+                    logger.info(f"Page {page_num + 1}: Using OCR fallback for Thai text extraction")
+                    ocr_text = self._ocr_page(page, page_num)
+                    if ocr_text:
+                        return ocr_text
+                    
+            return text
+            
+        except Exception as e:
+            logger.warning(f"Error extracting text from page {page_num}: {e}")
+            return ""
+
+    def _is_text_garbled(self, text: str) -> bool:
+        """
+        Check if extracted text contains garbled characters.
+        Common issue with Thai PDFs using embedded fonts.
+
+        Args:
+            text: Text to check
+
+        Returns:
+            True if text appears garbled
+        """
+        if not text:
+            return False
+        
+        # Check for common garbled character patterns
+        garbled_patterns = [
+            r'[\uFFFD]',  # Replacement character
+            r'[Ê][ก-๙]',  # Common Thai garbling pattern (Ê followed by Thai)
+            r'[\u0080-\u009F]',  # Control characters
+        ]
+        
+        for pattern in garbled_patterns:
+            if re.search(pattern, text):
+                return True
+        
+        # Check ratio of Thai characters vs total
+        # If we have Thai-like content but it's mixed with weird chars, it's likely garbled
+        thai_chars = len(re.findall(r'[ก-๙]', text))
+        if thai_chars > 0:
+            # Look for suspicious adjacent character combinations
+            if re.search(r'[ก-๙][A-Z][ก-๙]', text) or re.search(r'[Ê][ก-๙]', text):
+                return True
+                
+        return False
+
+    def _ocr_page(self, page: fitz.Page, page_num: int) -> str:
+        """
+        Perform OCR on a page to extract text.
+        Uses pytesseract with Thai language support.
+
+        Args:
+            page: PyMuPDF page object
+            page_num: Page number
+
+        Returns:
+            OCR extracted text
+        """
+        try:
+            # Check if pytesseract is available (lazy load)
+            if self._tesseract_available is None:
+                try:
+                    import pytesseract
+                    self._tesseract_available = True
+                except ImportError:
+                    logger.warning("pytesseract not available, OCR fallback disabled")
+                    self._tesseract_available = False
+            
+            if not self._tesseract_available:
+                return ""
+            
+            import pytesseract
+            
+            # Render page to image at high resolution for better OCR
+            zoom = 2.5  # ~180 DPI
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat)
+            img_bytes = pix.tobytes("png")
+            pil_image = Image.open(io.BytesIO(img_bytes))
+            
+            # Perform OCR with Thai + English
+            # You can adjust languages as needed
+            try:
+                text = pytesseract.image_to_string(
+                    pil_image,
+                    lang='tha+eng',  # Thai + English
+                    config='--psm 6'  # Assume uniform block of text
+                )
+            except Exception as ocr_error:
+                # Fallback to Thai only
+                logger.debug(f"OCR with tha+eng failed, trying tha only: {ocr_error}")
+                text = pytesseract.image_to_string(
+                    pil_image,
+                    lang='tha',
+                    config='--psm 6'
+                )
+            
+            if text.strip():
+                logger.info(f"Page {page_num + 1}: OCR extracted {len(text)} characters")
+                return text.strip()
+                
+        except Exception as e:
+            logger.warning(f"OCR failed for page {page_num + 1}: {e}")
+        
+        return ""
+
+    def _check_ocr_available(self) -> bool:
+        """Check if OCR dependencies are available."""
+        if self._ocr_available is not None:
+            return self._ocr_available
+            
+        try:
+            import pytesseract
+            # Try to get tesseract version
+            pytesseract.get_tesseract_version()
+            self._ocr_available = True
+            logger.info("Tesseract OCR is available")
+        except Exception:
+            self._ocr_available = False
+            logger.warning("Tesseract OCR not available - install pytesseract and tesseract-ocr for Thai text support")
+        
+        return self._ocr_available
